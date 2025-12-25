@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSFiddle s3uf1o5d</title>
+
+  <style>
+    
+  </style>
+
+  
+</head>
+<body>
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Celestial Christmas Glow</title>
+  
+  <!-- 1. STYLE & UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body, html { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
+    canvas { touch-action: none; outline: none; }
+    #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: gold; font-family: monospace; }
+  </style>
+
+  <!-- 2. MEDIAPIPE GLOBALS -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+  <!-- 3. BABEL -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+
+  <div id="root" class="w-full h-full relative">
+    <div id="loader">Initializing Celestial Engine...</div>
+  </div>
+
+  <!-- 4. APPLICATION LOGIC -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useMemo, Suspense } from 'https://esm.sh/react@18.2.0';
+    import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+    import * as THREE from 'https://esm.sh/three@0.160.0';
+    import { Canvas, useFrame } from 'https://esm.sh/@react-three/fiber@8.15.16?deps=three@0.160.0,react@18.2.0';
+    import { OrbitControls, PerspectiveCamera } from 'https://esm.sh/@react-three/drei@9.99.0?deps=three@0.160.0,react@18.2.0,@react-three/fiber@8.15.16';
+    import { EffectComposer, Bloom } from 'https://esm.sh/@react-three/postprocessing@2.16.0?deps=three@0.160.0,react@18.2.0,@react-three/fiber@8.15.16';
+
+    const COUNT = 8000;
+    const DUMMY = new THREE.Object3D();
+    const C_COLOR = new THREE.Color();
+
+    // --- COMPONENT: 5-Pointed Star ---
+    function Star({ gesture }) {
+      const meshRef = useRef();
+      // Ultra-bright Gold Color
+      const glowColor = new THREE.Color(4, 3, 1); 
+
+      // Create a 2D Star Shape to extrude
+      const { shape, extrudeSettings } = useMemo(() => {
+        const s = new THREE.Shape();
+        const points = 5;
+        const outerRadius = 1.2;
+        const innerRadius = 0.5;
+        
+        // Draw the star lines
+        s.moveTo(0, outerRadius);
+        const step = Math.PI / points;
+        
+        for (let i = 0; i < 2 * points + 1; i++) {
+            const r = (i % 2 === 0) ? outerRadius : innerRadius;
+            const a = i * step;
+            // -sin(a) to rotate it correctly
+            s.lineTo(Math.sin(a) * r, Math.cos(a) * r);
+        }
+
+        const settings = {
+            depth: 0.3,         // Thickness
+            bevelEnabled: true,
+            bevelThickness: 0.1,
+            bevelSize: 0.1,
+            bevelSegments: 2
+        };
+
+        return { shape: s, extrudeSettings: settings };
+      }, []);
+
+      useFrame((state, delta) => {
+        if (!meshRef.current) return;
+        
+        // Spin logic
+        meshRef.current.rotation.y -= delta * 1.5;
+
+        // Scale Logic: Only appear when Tree (closed) is formed
+        const targetScale = gesture === 'closed' ? 1 : 0.001; 
+        
+        meshRef.current.scale.x += (targetScale - meshRef.current.scale.x) * 0.1;
+        meshRef.current.scale.y += (targetScale - meshRef.current.scale.y) * 0.1;
+        meshRef.current.scale.z += (targetScale - meshRef.current.scale.z) * 0.1;
+      });
+
+      return (
+        <mesh ref={meshRef} position={[0, 9.5, 0]}>
+          {/* Use ExtrudeGeometry for a proper 3D Star shape */}
+          <extrudeGeometry args={[shape, extrudeSettings]} />
+          {/* Centering the geometry manually by offsetting via geometry.translate is hard in JSX, 
+              so we just center the mesh pivot visually */}
+          <meshBasicMaterial color={glowColor} toneMapped={false} />
+        </mesh>
+      );
+    }
+
+    // --- COMPONENT: Hand Tracking ---
+    const HandController = ({ onGestureChange }) => {
+      const videoRef = useRef(null);
+
+      useEffect(() => {
+        if (!videoRef.current || !window.Hands || !window.Camera) return;
+
+        const hands = new window.Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+        });
+
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        hands.onResults((results) => {
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            detectGesture(results.multiHandLandmarks[0]);
+          } else {
+            onGestureChange('neutral');
+          }
+        });
+
+        const camera = new window.Camera(videoRef.current, {
+          onFrame: async () => {
+            if (videoRef.current) await hands.send({ image: videoRef.current });
+          },
+          width: 640,
+          height: 480,
+        });
+
+        camera.start();
+      }, []);
+
+      const detectGesture = (landmarks) => {
+        const wrist = landmarks[0];
+        const tips = [8, 12, 16, 20];
+        const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+
+        let extensionCount = 0;
+        tips.forEach(idx => {
+          const tip = landmarks[idx];
+          const mcp = landmarks[idx - 2]; 
+          if (dist(tip, wrist) > dist(mcp, wrist)) extensionCount++;
+        });
+
+        if (extensionCount <= 1) onGestureChange('closed');
+        else if (extensionCount >= 4) onGestureChange('open');
+        else onGestureChange('neutral');
+      };
+
+      return <video ref={videoRef} className="absolute opacity-0 pointer-events-none" playsInline />;
+    };
+
+    // --- COMPONENT: Particles ---
+    function SceneParticles({ gesture }) {
+      const meshRef = useRef();
+      
+      const { treePositions, chaosPositions, colors, blinkOffsets } = useMemo(() => {
+        const tPos = new Float32Array(COUNT * 3);
+        const cPos = new Float32Array(COUNT * 3);
+        const cols = new Float32Array(COUNT * 3);
+        const blinks = new Float32Array(COUNT);
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+        for (let i = 0; i < COUNT; i++) {
+          const i3 = i * 3;
+
+          // TREE SHAPE
+          const h = i / COUNT; 
+          const r = 8 * (1 - h) + 0.2; 
+          const theta = i * goldenAngle * 8; 
+          tPos[i3] = Math.cos(theta) * r;
+          tPos[i3+1] = (h * 18) - 9; 
+          tPos[i3+2] = Math.sin(theta) * r;
+
+          // CHAOS SHAPE
+          const u = Math.random();
+          const v = Math.random();
+          const phi = Math.acos(2 * u - 1);
+          const lambda = 2 * Math.PI * v;
+          const dist = 12 + Math.random() * 10;
+          cPos[i3] = dist * Math.sin(phi) * Math.cos(lambda);
+          cPos[i3+1] = dist * Math.sin(phi) * Math.sin(lambda);
+          cPos[i3+2] = dist * Math.cos(phi);
+
+          // COLORS
+          const rnd = Math.random();
+          let c;
+          if (rnd > 0.9) c = new THREE.Color('#ff0022');
+          else if (rnd > 0.6) c = new THREE.Color('#ffaa00');
+          else c = new THREE.Color('#ffffff');
+          
+          cols[i3] = c.r; cols[i3+1] = c.g; cols[i3+2] = c.b;
+          blinks[i] = Math.random() * 100;
+        }
+        return { treePositions: tPos, chaosPositions: cPos, colors: cols, blinkOffsets: blinks };
+      }, []);
+
+      const currentPositions = useRef(new Float32Array(chaosPositions));
+
+      useFrame((state) => {
+        if (!meshRef.current) return;
+        const time = state.clock.elapsedTime;
+        
+        let targetArr = chaosPositions;
+        if (gesture === 'closed') targetArr = treePositions;
+        
+        for (let i = 0; i < COUNT; i++) {
+          const i3 = i * 3;
+          let tx = targetArr[i3];
+          let ty = targetArr[i3+1];
+          let tz = targetArr[i3+2];
+
+          if (gesture !== 'closed') {
+             tx += Math.sin(time * 0.5 + i) * 0.05;
+             ty += Math.cos(time * 0.3 + i) * 0.05;
+          }
+          
+          const speed = gesture === 'closed' ? 0.08 : 0.03;
+          currentPositions.current[i3] += (tx - currentPositions.current[i3]) * speed;
+          currentPositions.current[i3+1] += (ty - currentPositions.current[i3+1]) * speed;
+          currentPositions.current[i3+2] += (tz - currentPositions.current[i3+2]) * speed;
+
+          DUMMY.position.set(currentPositions.current[i3], currentPositions.current[i3+1], currentPositions.current[i3+2]);
+
+          const blink = Math.sin(time * 4 + blinkOffsets[i]);
+          const isSparkling = blink > 0.92;
+          
+          let scale = isSparkling ? 1.8 : 0.4;
+          if (gesture === 'closed') scale = 0.5; 
+
+          DUMMY.scale.setScalar(scale);
+          DUMMY.updateMatrix();
+
+          C_COLOR.setRGB(colors[i3], colors[i3+1], colors[i3+2]);
+          if (isSparkling) C_COLOR.multiplyScalar(8); 
+
+          meshRef.current.setMatrixAt(i, DUMMY.matrix);
+          meshRef.current.setColorAt(i, C_COLOR);
+        }
+        meshRef.current.instanceMatrix.needsUpdate = true;
+        if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
+      });
+
+      return (
+        <instancedMesh ref={meshRef} args={[null, null, COUNT]}>
+          <sphereGeometry args={[0.1, 6, 6]} />
+          <meshBasicMaterial toneMapped={false} />
+        </instancedMesh>
+      );
+    }
+
+    // --- MAIN APP ---
+    function App() {
+      const [gesture, setGesture] = useState('neutral');
+
+      return (
+        <>
+          <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-10 p-8 flex flex-col justify-between items-center">
+             <div className="text-center animate-pulse">
+                <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600 drop-shadow-[0_0_10px_rgba(255,215,0,0.8)] font-serif italic">
+                  MERRY CHRISTMAS
+                </h1>
+                <p className="text-yellow-100/50 text-xs tracking-[0.3em] mt-2 uppercase">Guardians of the Eternal Scientific Flame</p>
+             </div>
+             
+             <div className="bg-black/60 backdrop-blur border border-white/10 px-6 py-3 rounded-full text-sm font-mono text-white/70">
+                GESTURE: 
+                <span className={gesture === 'closed' ? "text-green-400 font-bold ml-2" : gesture === 'open' ? "text-red-400 font-bold ml-2" : "text-blue-400 font-bold ml-2"}>
+                  {gesture === 'closed' ? "🎄 TREE COMPLETE" : gesture === 'open' ? "💥 NEBULA BURST" : "✋ AWAITING HAND"}
+                </span>
+             </div>
+          </div>
+
+          <HandController onGestureChange={setGesture} />
+
+          <Canvas dpr={[1, 1.5]} gl={{ antialias: false, toneMapping: THREE.ReinhardToneMapping }}>
+            <Suspense fallback={null}>
+              <PerspectiveCamera makeDefault position={[0, 0, 35]} fov={45} />
+              
+              <SceneParticles gesture={gesture} />
+              <Star gesture={gesture} />
+
+              <EffectComposer disableNormalPass>
+                <Bloom luminanceThreshold={0.8} mipmapBlur intensity={1.8} radius={0.5} />
+              </EffectComposer>
+              
+              <OrbitControls autoRotate autoRotateSpeed={0.5} enableZoom={false} enablePan={false} />
+            </Suspense>
+          </Canvas>
+        </>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+
+  <script>
+    
+  </script>
+</body>
+</html>
